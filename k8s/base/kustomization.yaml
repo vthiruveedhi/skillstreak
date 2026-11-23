@@ -12,4 +12,4 @@ resources:
 
 images:
   - name: ghcr.io/vthiruveedhi/skillstreak
-    newTag: latest
+    newTag: d629e8c
