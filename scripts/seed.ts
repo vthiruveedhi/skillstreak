@@ -1,33 +1,41 @@
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "../src/db/schema";
+import * as fs from "fs";
+import * as path from "path";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL!,
-});
+const dbPath = process.env.DATABASE_PATH || "./data/skillstreak.db";
 
-const db = drizzle(pool, { schema });
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
 
-const main = async () => {
+const sqlite = new Database(dbPath);
+sqlite.pragma("journal_mode = WAL");
+const db = drizzle(sqlite, { schema });
+
+const main = () => {
   try {
     console.log("🌱 Seeding database...");
+    console.log(`📁 Database path: ${dbPath}`);
 
     console.log("Clearing existing data...");
-    await db.delete(schema.challengeProgress);
-    await db.delete(schema.challengeOptions);
-    await db.delete(schema.challenges);
-    await db.delete(schema.lessons);
-    await db.delete(schema.unitProgress);
-    await db.delete(schema.resumeBullets);
-    await db.delete(schema.skillProgress);
-    await db.delete(schema.userProgress);
-    await db.delete(schema.units);
-    await db.delete(schema.users);
+    db.delete(schema.challengeProgress).run();
+    db.delete(schema.challengeOptions).run();
+    db.delete(schema.challenges).run();
+    db.delete(schema.lessons).run();
+    db.delete(schema.unitProgress).run();
+    db.delete(schema.resumeBullets).run();
+    db.delete(schema.skillProgress).run();
+    db.delete(schema.userProgress).run();
+    db.delete(schema.units).run();
+    db.delete(schema.users).run();
 
     console.log("Creating units...");
 
-    const [unit1] = await db
+    const unit1 = db
       .insert(schema.units)
       .values({
         title: "Foundation: DSA Fundamentals",
@@ -39,9 +47,10 @@ const main = async () => {
         capstoneResumeBullet: "Implemented production-grade LRU cache with O(1) operations in Go",
         resumeScoreBonus: 2,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const [unit2] = await db
+    const unit2 = db
       .insert(schema.units)
       .values({
         title: "Kubernetes Fundamentals",
@@ -54,9 +63,10 @@ const main = async () => {
         capstoneResumeBullet: "Architected and deployed production Kubernetes workloads with RBAC, NetworkPolicies, and resource management",
         resumeScoreBonus: 3,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const [unit3] = await db
+    const unit3 = db
       .insert(schema.units)
       .values({
         title: "System Design Essentials",
@@ -69,9 +79,10 @@ const main = async () => {
         capstoneResumeBullet: "Designed and documented scalable distributed systems handling 100K+ requests/second",
         resumeScoreBonus: 3,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const [unit4] = await db
+    const unit4 = db
       .insert(schema.units)
       .values({
         title: "AI Infrastructure",
@@ -84,9 +95,10 @@ const main = async () => {
         capstoneResumeBullet: "Built GPU-optimized LLM serving infrastructure with vLLM achieving 2x throughput improvement",
         resumeScoreBonus: 4,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const [unit5] = await db
+    const unit5 = db
       .insert(schema.units)
       .values({
         title: "Advanced Kubernetes & CKA",
@@ -99,11 +111,12 @@ const main = async () => {
         capstoneResumeBullet: "Developed custom Kubernetes operator in Go managing complex stateful workloads",
         resumeScoreBonus: 4,
       })
-      .returning();
+      .returning()
+      .get();
 
     console.log("Creating lessons and challenges...");
 
-    const lesson1 = await db
+    const lesson1 = db
       .insert(schema.lessons)
       .values({
         unitId: unit1.id,
@@ -115,12 +128,13 @@ const main = async () => {
         estimatedMinutes: 15,
         xpReward: 50,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const c1 = await db
+    const c1 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson1[0].id,
+        lessonId: lesson1.id,
         type: "SELECT",
         skillTrack: "coding",
         difficulty: "foundation",
@@ -131,19 +145,20 @@ const main = async () => {
         sourceRepo: "jwasham/coding-interview-university",
         tags: ["big-o", "bst", "data-structures"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c1[0].id, text: "O(1)", correct: false, order: 1 },
-      { challengeId: c1[0].id, text: "O(log n)", correct: true, order: 2 },
-      { challengeId: c1[0].id, text: "O(n)", correct: false, order: 3 },
-      { challengeId: c1[0].id, text: "O(n log n)", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c1.id, text: "O(1)", correct: false, order: 1 },
+      { challengeId: c1.id, text: "O(log n)", correct: true, order: 2 },
+      { challengeId: c1.id, text: "O(n)", correct: false, order: 3 },
+      { challengeId: c1.id, text: "O(n log n)", correct: false, order: 4 },
+    ]).run();
 
-    const c2 = await db
+    const c2 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson1[0].id,
+        lessonId: lesson1.id,
         type: "SELECT",
         skillTrack: "coding",
         difficulty: "foundation",
@@ -154,16 +169,17 @@ const main = async () => {
         sourceRepo: "neetcode-gh/leetcode",
         tags: ["recursion", "space-complexity"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c2[0].id, text: "O(1)", correct: false, order: 1 },
-      { challengeId: c2[0].id, text: "O(n)", correct: true, order: 2 },
-      { challengeId: c2[0].id, text: "O(2^n)", correct: false, order: 3 },
-      { challengeId: c2[0].id, text: "O(n^2)", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c2.id, text: "O(1)", correct: false, order: 1 },
+      { challengeId: c2.id, text: "O(n)", correct: true, order: 2 },
+      { challengeId: c2.id, text: "O(2^n)", correct: false, order: 3 },
+      { challengeId: c2.id, text: "O(n^2)", correct: false, order: 4 },
+    ]).run();
 
-    const lesson2 = await db
+    const lesson2 = db
       .insert(schema.lessons)
       .values({
         unitId: unit1.id,
@@ -175,12 +191,12 @@ const main = async () => {
         estimatedMinutes: 20,
         xpReward: 60,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const c3 = await db
-      .insert(schema.challenges)
+    db.insert(schema.challenges)
       .values({
-        lessonId: lesson2[0].id,
+        lessonId: lesson2.id,
         type: "FREE_TEXT",
         skillTrack: "coding",
         difficulty: "foundation",
@@ -208,9 +224,9 @@ Write your solution in Python:`,
         sourceRepo: "neetcode-gh/leetcode",
         tags: ["hash-map", "arrays", "two-pointers"],
       })
-      .returning();
+      .run();
 
-    const lesson3 = await db
+    const lesson3 = db
       .insert(schema.lessons)
       .values({
         unitId: unit2.id,
@@ -222,12 +238,13 @@ Write your solution in Python:`,
         estimatedMinutes: 20,
         xpReward: 55,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const c4 = await db
+    const c4 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson3[0].id,
+        lessonId: lesson3.id,
         type: "SELECT",
         skillTrack: "kubernetes",
         difficulty: "foundation",
@@ -238,19 +255,20 @@ Write your solution in Python:`,
         sourceRepo: "kelseyhightower/kubernetes-the-hard-way",
         tags: ["kubernetes", "scheduling", "control-plane"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c4[0].id, text: "kubelet", correct: false, order: 1 },
-      { challengeId: c4[0].id, text: "kube-proxy", correct: false, order: 2 },
-      { challengeId: c4[0].id, text: "kube-scheduler", correct: true, order: 3 },
-      { challengeId: c4[0].id, text: "etcd", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c4.id, text: "kubelet", correct: false, order: 1 },
+      { challengeId: c4.id, text: "kube-proxy", correct: false, order: 2 },
+      { challengeId: c4.id, text: "kube-scheduler", correct: true, order: 3 },
+      { challengeId: c4.id, text: "etcd", correct: false, order: 4 },
+    ]).run();
 
-    const c5 = await db
+    const c5 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson3[0].id,
+        lessonId: lesson3.id,
         type: "SELECT",
         skillTrack: "kubernetes",
         difficulty: "foundation",
@@ -261,16 +279,17 @@ Write your solution in Python:`,
         sourceRepo: "kelseyhightower/kubernetes-the-hard-way",
         tags: ["etcd", "consensus", "raft"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c5[0].id, text: "Paxos", correct: false, order: 1 },
-      { challengeId: c5[0].id, text: "Raft", correct: true, order: 2 },
-      { challengeId: c5[0].id, text: "Two-Phase Commit", correct: false, order: 3 },
-      { challengeId: c5[0].id, text: "Gossip Protocol", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c5.id, text: "Paxos", correct: false, order: 1 },
+      { challengeId: c5.id, text: "Raft", correct: true, order: 2 },
+      { challengeId: c5.id, text: "Two-Phase Commit", correct: false, order: 3 },
+      { challengeId: c5.id, text: "Gossip Protocol", correct: false, order: 4 },
+    ]).run();
 
-    const lesson4 = await db
+    const lesson4 = db
       .insert(schema.lessons)
       .values({
         unitId: unit3.id,
@@ -282,12 +301,13 @@ Write your solution in Python:`,
         estimatedMinutes: 25,
         xpReward: 65,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const c6 = await db
+    const c6 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson4[0].id,
+        lessonId: lesson4.id,
         type: "SELECT",
         skillTrack: "system-design",
         difficulty: "foundation",
@@ -298,16 +318,17 @@ Write your solution in Python:`,
         sourceRepo: "donnemartin/system-design-primer",
         tags: ["cap-theorem", "distributed-systems"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c6[0].id, text: "Between Consistency and Availability", correct: true, order: 1 },
-      { challengeId: c6[0].id, text: "Between Speed and Storage", correct: false, order: 2 },
-      { challengeId: c6[0].id, text: "Between Cost and Performance", correct: false, order: 3 },
-      { challengeId: c6[0].id, text: "All three can be achieved", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c6.id, text: "Between Consistency and Availability", correct: true, order: 1 },
+      { challengeId: c6.id, text: "Between Speed and Storage", correct: false, order: 2 },
+      { challengeId: c6.id, text: "Between Cost and Performance", correct: false, order: 3 },
+      { challengeId: c6.id, text: "All three can be achieved", correct: false, order: 4 },
+    ]).run();
 
-    const lesson5 = await db
+    const lesson5 = db
       .insert(schema.lessons)
       .values({
         unitId: unit4.id,
@@ -319,12 +340,13 @@ Write your solution in Python:`,
         estimatedMinutes: 25,
         xpReward: 70,
       })
-      .returning();
+      .returning()
+      .get();
 
-    const c7 = await db
+    const c7 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson5[0].id,
+        lessonId: lesson5.id,
         type: "SELECT",
         skillTrack: "ai-infra",
         difficulty: "intermediate",
@@ -335,19 +357,20 @@ Write your solution in Python:`,
         sourceRepo: "vllm-project/vllm",
         tags: ["vllm", "paged-attention", "inference"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c7[0].id, text: "Using CPUs instead of GPUs", correct: false, order: 1 },
-      { challengeId: c7[0].id, text: "PagedAttention for efficient memory management", correct: true, order: 2 },
-      { challengeId: c7[0].id, text: "Smaller model architectures", correct: false, order: 3 },
-      { challengeId: c7[0].id, text: "Removing the attention mechanism", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c7.id, text: "Using CPUs instead of GPUs", correct: false, order: 1 },
+      { challengeId: c7.id, text: "PagedAttention for efficient memory management", correct: true, order: 2 },
+      { challengeId: c7.id, text: "Smaller model architectures", correct: false, order: 3 },
+      { challengeId: c7.id, text: "Removing the attention mechanism", correct: false, order: 4 },
+    ]).run();
 
-    const c8 = await db
+    const c8 = db
       .insert(schema.challenges)
       .values({
-        lessonId: lesson5[0].id,
+        lessonId: lesson5.id,
         type: "SELECT",
         skillTrack: "ai-infra",
         difficulty: "intermediate",
@@ -358,14 +381,15 @@ Write your solution in Python:`,
         sourceRepo: "stas00/ml-engineering",
         tags: ["batching", "inference", "throughput"],
       })
-      .returning();
+      .returning()
+      .get();
 
-    await db.insert(schema.challengeOptions).values([
-      { challengeId: c8[0].id, text: "Reduces model size", correct: false, order: 1 },
-      { challengeId: c8[0].id, text: "Improves GPU utilization by not waiting for slowest request", correct: true, order: 2 },
-      { challengeId: c8[0].id, text: "Enables distributed training", correct: false, order: 3 },
-      { challengeId: c8[0].id, text: "Encrypts model weights", correct: false, order: 4 },
-    ]);
+    db.insert(schema.challengeOptions).values([
+      { challengeId: c8.id, text: "Reduces model size", correct: false, order: 1 },
+      { challengeId: c8.id, text: "Improves GPU utilization by not waiting for slowest request", correct: true, order: 2 },
+      { challengeId: c8.id, text: "Enables distributed training", correct: false, order: 3 },
+      { challengeId: c8.id, text: "Encrypts model weights", correct: false, order: 4 },
+    ]).run();
 
     console.log("✅ Database seeded successfully!");
     console.log(`
@@ -387,7 +411,7 @@ The curriculum is grounded in these GitHub resources:
     console.error("Error seeding database:", error);
     throw error;
   } finally {
-    await pool.end();
+    sqlite.close();
   }
 };
 

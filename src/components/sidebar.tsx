@@ -1,5 +1,6 @@
+"use client";
+
 import Link from "next/link";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 import { SidebarItem } from "./sidebar-item";
 import { Flame, BookOpen, FileText, Settings } from "lucide-react";

@@ -1,39 +1,23 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: skillstreak-postgres
-    environment:
-      POSTGRES_USER: skillstreak
-      POSTGRES_PASSWORD: skillstreak_dev
-      POSTGRES_DB: skillstreak
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U skillstreak"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: skillstreak-app
-    environment:
-      DATABASE_URL: postgresql://skillstreak:skillstreak_dev@postgres:5432/skillstreak
-      AUTH_SECRET: dev_secret_at_least_32_characters_long
-      AUTH_PASSPHRASE: devpassword
-      NEXTAUTH_URL: http://localhost:3000
-      NODE_ENV: production
+    build: .
     ports:
       - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    environment:
+      - DATABASE_PATH=/app/data/skillstreak.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-in-production}
+      - NEXTAUTH_URL=http://localhost:3000
+      - AUTH_PASSPHRASE=${AUTH_PASSPHRASE:-skillstreak2026}
+    volumes:
+      - skillstreak-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
-  postgres_data:
+  skillstreak-data:

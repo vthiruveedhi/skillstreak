@@ -1,49 +1,38 @@
 import { relations } from "drizzle-orm";
 import {
-  boolean,
   integer,
-  pgEnum,
-  pgTable,
-  serial,
+  sqliteTable,
   text,
-  timestamp,
-  jsonb,
   unique,
-} from "drizzle-orm/pg-core";
+} from "drizzle-orm/sqlite-core";
 
 export const MAX_HEARTS = 5;
 export const HEARTS_TO_REFILL = 5;
 export const POINTS_TO_REFILL_HEARTS = 50;
 
-export const skillTrackEnum = pgEnum("skill_track", [
+export const skillTracks = [
   "coding",
   "system-design",
   "kubernetes",
   "cloud",
   "ai-infra",
   "behavioral",
-]);
+] as const;
+export type SkillTrack = (typeof skillTracks)[number];
 
-export const challengeTypeEnum = pgEnum("challenge_type", [
-  "SELECT",
-  "FILL_IN",
-  "ORDER",
-  "FREE_TEXT",
-]);
+export const challengeTypes = ["SELECT", "FILL_IN", "ORDER", "FREE_TEXT"] as const;
+export type ChallengeType = (typeof challengeTypes)[number];
 
-export const difficultyEnum = pgEnum("difficulty", [
-  "foundation",
-  "intermediate",
-  "advanced",
-]);
+export const difficulties = ["foundation", "intermediate", "advanced"] as const;
+export type Difficulty = (typeof difficulties)[number];
 
-export const users = pgTable("users", {
+export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
 });
 
-export const userProgress = pgTable("user_progress", {
+export const userProgress = sqliteTable("user_progress", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   hearts: integer("hearts").notNull().default(MAX_HEARTS),
   points: integer("points").notNull().default(0),
@@ -65,12 +54,12 @@ export const userProgressRelations = relations(userProgress, ({ one }) => ({
   }),
 }));
 
-export const skillProgress = pgTable(
+export const skillProgress = sqliteTable(
   "skill_progress",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-    track: skillTrackEnum("track").notNull(),
+    track: text("track").$type<SkillTrack>().notNull(),
     xp: integer("xp").notNull().default(0),
     level: integer("level").notNull().default(1),
     challengesCompleted: integer("challenges_completed").notNull().default(0),
@@ -78,8 +67,8 @@ export const skillProgress = pgTable(
   (t) => [unique().on(t.userId, t.track)]
 );
 
-export const units = pgTable("units", {
-  id: serial("id").primaryKey(),
+export const units = sqliteTable("units", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   description: text("description").notNull(),
   order: integer("order").notNull(),
@@ -99,8 +88,8 @@ export const unitsRelations = relations(units, ({ many, one }) => ({
   }),
 }));
 
-export const lessons = pgTable("lessons", {
-  id: serial("id").primaryKey(),
+export const lessons = sqliteTable("lessons", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   unitId: integer("unit_id")
     .references(() => units.id, { onDelete: "cascade" })
     .notNull(),
@@ -121,14 +110,14 @@ export const lessonsRelations = relations(lessons, ({ one, many }) => ({
   challenges: many(challenges),
 }));
 
-export const challenges = pgTable("challenges", {
-  id: serial("id").primaryKey(),
+export const challenges = sqliteTable("challenges", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   lessonId: integer("lesson_id")
     .references(() => lessons.id, { onDelete: "cascade" })
     .notNull(),
-  type: challengeTypeEnum("type").notNull(),
-  skillTrack: skillTrackEnum("skill_track").notNull(),
-  difficulty: difficultyEnum("difficulty").notNull().default("foundation"),
+  type: text("type").$type<ChallengeType>().notNull(),
+  skillTrack: text("skill_track").$type<SkillTrack>().notNull(),
+  difficulty: text("difficulty").$type<Difficulty>().notNull().default("foundation"),
   question: text("question").notNull(),
   content: text("content"),
   order: integer("order").notNull(),
@@ -137,7 +126,7 @@ export const challenges = pgTable("challenges", {
   explanation: text("explanation"),
   codeLanguage: text("code_language"),
   sourceRepo: text("source_repo"),
-  tags: jsonb("tags").$type<string[]>(),
+  tags: text("tags", { mode: "json" }).$type<string[]>(),
 });
 
 export const challengesRelations = relations(challenges, ({ one, many }) => ({
@@ -149,13 +138,13 @@ export const challengesRelations = relations(challenges, ({ one, many }) => ({
   challengeProgress: many(challengeProgress),
 }));
 
-export const challengeOptions = pgTable("challenge_options", {
-  id: serial("id").primaryKey(),
+export const challengeOptions = sqliteTable("challenge_options", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   challengeId: integer("challenge_id")
     .references(() => challenges.id, { onDelete: "cascade" })
     .notNull(),
   text: text("text").notNull(),
-  correct: boolean("correct").notNull(),
+  correct: integer("correct", { mode: "boolean" }).notNull(),
   order: integer("order"),
 });
 
@@ -169,19 +158,19 @@ export const challengeOptionsRelations = relations(
   })
 );
 
-export const challengeProgress = pgTable(
+export const challengeProgress = sqliteTable(
   "challenge_progress",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     challengeId: integer("challenge_id")
       .references(() => challenges.id, { onDelete: "cascade" })
       .notNull(),
-    completed: boolean("completed").notNull().default(false),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
     xpEarned: integer("xp_earned").default(0),
     selfGrade: integer("self_grade"),
     userAnswer: text("user_answer"),
-    completedAt: timestamp("completed_at"),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
   },
   (t) => [unique().on(t.userId, t.challengeId)]
 );
@@ -196,26 +185,26 @@ export const challengeProgressRelations = relations(
   })
 );
 
-export const unitProgress = pgTable(
+export const unitProgress = sqliteTable(
   "unit_progress",
   {
-    id: serial("id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     unitId: integer("unit_id")
       .references(() => units.id, { onDelete: "cascade" })
       .notNull(),
-    completed: boolean("completed").notNull().default(false),
-    capstoneCompleted: boolean("capstone_completed").notNull().default(false),
-    completedAt: timestamp("completed_at"),
+    completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+    capstoneCompleted: integer("capstone_completed", { mode: "boolean" }).notNull().default(false),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
   },
   (t) => [unique().on(t.userId, t.unitId)]
 );
 
-export const resumeBullets = pgTable("resume_bullets", {
-  id: serial("id").primaryKey(),
+export const resumeBullets = sqliteTable("resume_bullets", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   bullet: text("bullet").notNull(),
-  skillTrack: skillTrackEnum("skill_track").notNull(),
-  earnedAt: timestamp("earned_at").defaultNow().notNull(),
+  skillTrack: text("skill_track").$type<SkillTrack>().notNull(),
+  earnedAt: integer("earned_at", { mode: "timestamp" }).$defaultFn(() => new Date()).notNull(),
   fromUnitId: integer("from_unit_id").references(() => units.id),
 });

@@ -6,10 +6,10 @@ namespace: skillstreak
 resources:
   - namespace.yaml
   - secrets.yaml
-  - postgres.yaml
+  - pvc.yaml
   - deployment.yaml
   - service.yaml
 
-commonLabels:
-  app.kubernetes.io/name: skillstreak
-  app.kubernetes.io/part-of: skillstreak
+images:
+  - name: ghcr.io/vthiruveedhi/skillstreak
+    newTag: latest

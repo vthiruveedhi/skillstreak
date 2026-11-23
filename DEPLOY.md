@@ -1,101 +1,178 @@
 # SkillStreak Deployment Guide
 
+Deploy SkillStreak to GKE cluster `im-sbox-gke-dev`.
+
 ## Prerequisites
 
-- `kubectl` installed and configured
-- Access to GKE cluster `im-sbox-gke-dev`
-- Docker image built and pushed to GHCR (happens automatically on push to main)
+- `gcloud` CLI authenticated
+- `kubectl` configured
+- Access to GKE cluster `im-sbox-gke-dev` in project `im-sbox-dev`
 
-## Quick Start
-
-### 1. Connect to your GKE cluster
+## 1. Configure kubectl
 
 ```bash
-gcloud container clusters get-credentials im-sbox-gke-dev --region us-central1 --project im-sbox-dev
+gcloud container clusters get-credentials im-sbox-gke-dev \
+  --region us-central1 \
+  --project im-sbox-dev
 ```
 
-### 2. Update the secrets
+## 2. Update Secrets
 
-Before deploying, edit `k8s/base/secrets.yaml` to set your actual values:
+Edit `k8s/base/secrets.yaml` with your values:
 
+```yaml
+stringData:
+  AUTH_PASSPHRASE: "your-secure-passphrase"
+  NEXTAUTH_SECRET: "random-32-char-string"
+```
+
+Generate a secure NEXTAUTH_SECRET:
 ```bash
-# Generate a secure password and auth secret
-export DB_PASSWORD=$(openssl rand -base64 24)
-export AUTH_SECRET=$(openssl rand -base64 32)
-export AUTH_PASSPHRASE="your-secure-passphrase"
-
-# Update the secrets file
-sed -i "s/CHANGE_ME_TO_A_SECURE_PASSWORD/$DB_PASSWORD/g" k8s/base/secrets.yaml
-sed -i "s/CHANGE_ME_TO_A_RANDOM_32_CHAR_STRING/$AUTH_SECRET/g" k8s/base/secrets.yaml
-sed -i "s/CHANGE_ME_TO_YOUR_PASSPHRASE/$AUTH_PASSPHRASE/g" k8s/base/secrets.yaml
+openssl rand -base64 32
 ```
 
-Or manually edit `k8s/base/secrets.yaml` with your preferred values.
-
-### 3. Deploy the application
+## 3. Deploy to Kubernetes
 
 ```bash
 # Apply all resources
 kubectl apply -k k8s/base/
 
-# Wait for Postgres to be ready
-kubectl wait --for=condition=ready pod -l app=postgres -n skillstreak --timeout=120s
+# Watch deployment rollout
+kubectl -n skillstreak rollout status deployment/skillstreak
 
-# Run the seed job to initialize the database
-kubectl apply -f k8s/base/seed-job.yaml
+# Check pod status
+kubectl -n skillstreak get pods
 
-# Check seed job status
-kubectl logs -f job/skillstreak-seed -n skillstreak
-
-# Wait for the app deployment to be ready
-kubectl wait --for=condition=available deployment/skillstreak -n skillstreak --timeout=120s
+# Get the LoadBalancer external IP
+kubectl -n skillstreak get svc skillstreak
 ```
 
-### 4. Get the external IP
+The app will be available at `http://<EXTERNAL-IP>:3000`.
+
+## 4. Update Image Tag (after CI builds)
+
+After GitHub Actions builds a new image:
 
 ```bash
-kubectl get svc skillstreak -n skillstreak -w
+# Update to specific SHA tag
+kubectl -n skillstreak set image deployment/skillstreak \
+  skillstreak=ghcr.io/vthiruveedhi/skillstreak:<sha> \
+  init-db=ghcr.io/vthiruveedhi/skillstreak:<sha>
+
+# Or with kustomize
+cd k8s/base
+kustomize edit set image ghcr.io/vthiruveedhi/skillstreak:TAG=<sha>
+kubectl apply -k .
 ```
 
-Wait for the `EXTERNAL-IP` to be assigned (may take 1-2 minutes on GKE).
+## Architecture
 
-### 5. Access the app
+- **Database**: SQLite stored on a PersistentVolumeClaim (1Gi)
+- **Replicas**: 1 (required for RWO volume)
+- **Strategy**: Recreate (ensures clean volume handoff)
+- **Init Container**: Runs database migrations and seeding on startup
 
-Open `http://<EXTERNAL-IP>` in your browser. Use the passphrase you set in step 2 to log in.
+## Backup & Restore
 
-## Image Pull Configuration
-
-The image is public on GHCR. If you need to use an imagePullSecret for private images:
+### Backup the SQLite database
 
 ```bash
-# Create imagePullSecret
-kubectl create secret docker-registry ghcr-secret \
-  --docker-server=ghcr.io \
-  --docker-username=YOUR_GITHUB_USERNAME \
-  --docker-password=YOUR_GITHUB_PAT \
-  -n skillstreak
+# Find the pod name
+POD=$(kubectl -n skillstreak get pods -l app=skillstreak -o jsonpath='{.items[0].metadata.name}')
 
-# Then add to deployment.yaml under spec.template.spec:
-# imagePullSecrets:
-#   - name: ghcr-secret
+# Copy the database file to local machine
+kubectl cp skillstreak/$POD:/app/data/skillstreak.db ./skillstreak-backup-$(date +%Y%m%d).db
+
+# Optional: also backup the WAL file if it exists
+kubectl cp skillstreak/$POD:/app/data/skillstreak.db-wal ./skillstreak-backup-$(date +%Y%m%d).db-wal 2>/dev/null || true
 ```
 
-## Update the App URL (for HTTPS)
-
-After deployment, update the `NEXTAUTH_URL` environment variable in the deployment:
+### Restore from backup
 
 ```bash
-kubectl set env deployment/skillstreak NEXTAUTH_URL=http://<EXTERNAL-IP> -n skillstreak
+# Scale down the deployment first
+kubectl -n skillstreak scale deployment/skillstreak --replicas=0
+
+# Wait for pod to terminate
+kubectl -n skillstreak wait --for=delete pod -l app=skillstreak --timeout=60s
+
+# Start a temporary pod to access the PVC
+kubectl -n skillstreak run restore-pod --image=alpine --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"restore","image":"alpine","command":["sleep","3600"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"skillstreak-data"}}]}}'
+
+# Wait for pod to be ready
+kubectl -n skillstreak wait --for=condition=Ready pod/restore-pod --timeout=60s
+
+# Copy backup to the PVC
+kubectl cp ./skillstreak-backup.db skillstreak/restore-pod:/data/skillstreak.db
+
+# Clean up restore pod
+kubectl -n skillstreak delete pod restore-pod
+
+# Scale back up
+kubectl -n skillstreak scale deployment/skillstreak --replicas=1
 ```
 
-For HTTPS with a custom domain, see the optional Gateway/Ingress section below.
+## Logs & Debugging
 
-## Optional: HTTPS with GKE Managed Certificate
+```bash
+# View app logs
+kubectl -n skillstreak logs -l app=skillstreak -f
 
-If you have a domain pointing to the LoadBalancer IP, create a ManagedCertificate:
+# View init container logs
+kubectl -n skillstreak logs -l app=skillstreak -c init-db
+
+# Exec into the pod
+kubectl -n skillstreak exec -it deployment/skillstreak -- sh
+
+# Check database file
+kubectl -n skillstreak exec deployment/skillstreak -- ls -la /app/data/
+```
+
+## Troubleshooting
+
+### Pod stuck in Init:CrashLoopBackOff
+Check init container logs:
+```bash
+kubectl -n skillstreak logs -l app=skillstreak -c init-db
+```
+
+### Database locked errors
+Ensure only one replica is running (Recreate strategy should handle this).
+
+### PVC not binding
+Check storage class availability:
+```bash
+kubectl get sc
+kubectl -n skillstreak describe pvc skillstreak-data
+```
+
+## Optional: GKE Ingress with HTTPS
+
+Create `k8s/overlays/production/ingress.yaml`:
 
 ```yaml
-# k8s/base/certificate.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skillstreak
+  namespace: skillstreak
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    networking.gke.io/managed-certificates: "skillstreak-cert"
+spec:
+  rules:
+    - host: skillstreak.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: skillstreak
+                port:
+                  number: 3000
+---
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
@@ -103,60 +180,15 @@ metadata:
   namespace: skillstreak
 spec:
   domains:
-    - skillstreak.yourdomain.com
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: skillstreak-ingress
-  namespace: skillstreak
-  annotations:
-    networking.gke.io/managed-certificates: skillstreak-cert
-    kubernetes.io/ingress.class: "gce"
-spec:
-  rules:
-    - host: skillstreak.yourdomain.com
-      http:
-        paths:
-          - path: /*
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: skillstreak
-                port:
-                  number: 80
+    - skillstreak.example.com
 ```
 
-## Troubleshooting
-
-### Check pod logs
-```bash
-kubectl logs -f deployment/skillstreak -n skillstreak
-```
-
-### Check pod status
-```bash
-kubectl describe pod -l app=skillstreak -n skillstreak
-```
-
-### Restart deployment
-```bash
-kubectl rollout restart deployment/skillstreak -n skillstreak
-```
-
-### Re-run seed job
-```bash
-kubectl delete job skillstreak-seed -n skillstreak
-kubectl apply -f k8s/base/seed-job.yaml
-```
-
-### Connect to Postgres
-```bash
-kubectl exec -it postgres-0 -n skillstreak -- psql -U skillstreak -d skillstreak
-```
+Then update `NEXTAUTH_URL` in the deployment to match your domain.
 
 ## Clean Up
 
 ```bash
 kubectl delete -k k8s/base/
 ```
+
+Note: This will delete the PVC and all data. Take a backup first!
